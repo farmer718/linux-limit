@@ -1,6 +1,6 @@
 #!/bin/bash
 # ====================================================
-# 网络限速策略自动同步与执行脚本 (一键部署版 - 最终优化版)
+# 网络限速策略自动同步与执行脚本 (一键部署版 - 阅后即焚版)
 # ====================================================
 
 # 1. 权限检查
@@ -15,7 +15,6 @@ echo "⏳ 开始环境初始化..."
 if [ -x "$(command -v apt-get)" ]; then
     echo "📦 检测到 Debian/Ubuntu 架构，正在检查依赖..."
     apt-get update -y > /dev/null 2>&1
-    # 确保 coreutils (包含 md5sum) 存在
     apt-get install -y curl jq iproute2 cron awk coreutils > /dev/null 2>&1 
 elif [ -x "$(command -v yum)" ]; then
     echo "📦 检测到 CentOS/RHEL 架构，正在检查依赖..."
@@ -34,7 +33,6 @@ LOG_FILE="/var/log/net_limit_agent.log"
 CRON_FILE="/etc/cron.d/net_limit_agent"
 
 # 4. 生成核心工作脚本 (Worker)
-# 使用 cat << 'EOF' 确保内部变量按字面量写入
 cat << 'EOF' > $WORKER_SCRIPT
 #!/bin/bash
 
@@ -63,21 +61,18 @@ if [ -z "$RESPONSE" ]; then
     exit 1
 fi
 
-# 4. ================= 核心优化：状态对比与跳过机制 =================
+# 4. 状态对比与跳过机制
 CURRENT_MD5=$(echo "$RESPONSE" | md5sum | awk '{print $1}')
 
 if [ -f "$CACHE_FILE" ]; then
     LAST_MD5=$(cat "$CACHE_FILE")
-    # 如果 MD5 未变，直接无损退出，不干预网卡
     if [ "$CURRENT_MD5" = "$LAST_MD5" ]; then
         exit 0
     fi
 fi
 
-# 状态发生变化，保存新的状态
 echo "$CURRENT_MD5" > "$CACHE_FILE"
 echo "$LOG_PREFIX 🔄 策略状态更新，准备重构网卡规则..."
-# ==========================================================
 
 # 5. JSON 解析与容错处理
 ENABLED=$(echo "$RESPONSE" | jq -r '.enabled // empty')
@@ -87,22 +82,18 @@ DELAY_MS=$(echo "$RESPONSE" | jq -r '.delayMs // 0')
 JITTER_MS=$(echo "$RESPONSE" | jq -r '.jitterMs // 0')
 
 # 6. 策略执行逻辑
-# 清理现有规则
 tc qdisc del dev $IFACE root 2>/dev/null
 
-# 判断开关状态：空、null 或 0 均视为禁用
 if [ -z "$ENABLED" ] || [ "$ENABLED" = "null" ] || [ "$ENABLED" = "0" ]; then
-    echo "$LOG_PREFIX 🟢 策略已禁用，网卡 $IFACE 已恢复无限制状态。"
+    echo "$LOG_PREFIX 🟢 策略已禁用，网卡 $IFACE 已恢复无限制状态。" >> $LOG_FILE
     exit 0
 fi
 
-echo "$LOG_PREFIX ⚙️ 应用新策略 - IP:$PUBLIC_IP 网卡:$IFACE | 宽带:${LIMIT_MBPS}Mbps 丢包:${LOSS}% 延迟:${DELAY_MS}ms 抖动:${JITTER_MS}ms"
+echo "$LOG_PREFIX ⚙️ 应用新策略 - IP:$PUBLIC_IP 网卡:$IFACE | 宽带:${LIMIT_MBPS}Mbps 丢包:${LOSS}% 延迟:${DELAY_MS}ms 抖动:${JITTER_MS}ms" >> $LOG_FILE
 
-# A. 使用 HTB 建立根队列管理带宽
 tc qdisc add dev $IFACE root handle 1: htb default 10
 tc class add dev $IFACE parent 1: classid 1:10 htb rate ${LIMIT_MBPS}mbit
 
-# B. 动态拼接 netem 延迟/丢包参数
 NETEM_ARGS=""
 
 if awk "BEGIN {exit !($DELAY_MS > 0)}"; then
@@ -116,19 +107,18 @@ if awk "BEGIN {exit !($LOSS > 0)}"; then
     NETEM_ARGS="$NETEM_ARGS loss ${LOSS}%"
 fi
 
-# C. 将 netem 作为子节点挂载到 HTB 下 (级联生效)
 if [ -n "$NETEM_ARGS" ]; then
     tc qdisc add dev $IFACE parent 1:10 handle 10: netem $NETEM_ARGS
 fi
 
-echo "$LOG_PREFIX ✅ 策略应用成功。"
+echo "$LOG_PREFIX ✅ 策略应用成功。" >> $LOG_FILE
 EOF
 
 # 赋予执行权限
 chmod +x $WORKER_SCRIPT
 
 # 5. 配置并持久化 Cron 定时任务
-echo "*/2 * * * * root $WORKER_SCRIPT >> $LOG_FILE 2>&1" > $CRON_FILE
+echo "*/2 * * * * root $WORKER_SCRIPT >> /dev/null 2>&1" > $CRON_FILE
 chmod 644 $CRON_FILE
 
 # 平滑重启计划任务服务
@@ -140,10 +130,16 @@ fi
 
 echo "===================================================="
 echo "🎉 部署完成！"
-echo "📄 工作脚本路径: $WORKER_SCRIPT"
+echo "📄 工作脚本已写入: $WORKER_SCRIPT"
 echo "📝 日志文件路径: $LOG_FILE"
 echo "⏱️ 执行频率: 每 2 分钟一次 (带有 MD5 防震荡检测)"
 echo "===================================================="
-echo "🚀 正在进行首次手动触发测试，以下是执行日志："
+echo "🚀 正在进行首次手动触发测试..."
 bash $WORKER_SCRIPT
 tail -n 2 $LOG_FILE
+
+# ================= 新增：自毁逻辑 =================
+echo "🧹 清理安装环境：正在删除本安装脚本 ($0)..."
+rm -f "$0"
+echo "✨ 清理完成！"
+# ====================================================
