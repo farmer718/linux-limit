@@ -7,13 +7,13 @@
 ### 一键安装
 
 ```bash
-sudo bash <(curl -Ls https://raw.githubusercontent.com/githubzhangfei/linux-limit/main/install.sh)
+curl -Ls https://raw.githubusercontent.com/githubzhangfei/linux-limit/main/install_limit.sh | sed 's/\r$//' | sudo bash
 ```
 
 或者
 
 ```bash
-curl -Ls https://raw.githubusercontent.com/githubzhangfei/linux-limit/main/install.sh | sudo bash
+curl -Ls https://raw.githubusercontent.com/githubzhangfei/linux-limit/main/install_limit.sh | sudo bash
 ```
 
 ### 支持的系统
